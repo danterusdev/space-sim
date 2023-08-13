@@ -13,8 +13,8 @@ Object :: union {
 }
 
 StaticObject :: struct {
-    x: uint,
-    y: uint,
+    x: f64,
+    y: f64,
     mass: uint,
 }
 
@@ -22,35 +22,86 @@ DynamicObject :: struct {
     x: f64,
     y: f64,
     velocity: [2]f64,
+    mass: uint,
 }
 
 SPEED :: 5
 
-update_object :: proc(object: ^Object, objects: [dynamic]Object) {
+size_from_mass :: proc(mass: f64) -> f64 {
+    return math.sqrt(mass)
+}
+
+update_objects :: proc(objects: ^[dynamic]Object) {
     for _ in 0..<SPEED {
-        switch &o in object {
-            case DynamicObject:
-                o.x += o.velocity.x
-                o.y += o.velocity.y
-                for object in objects {
-                    #partial switch ob in object {
-                        case StaticObject:
+        i := 0
+        for i < len(objects) {
+            skip_add := false
+            object := &objects[i]
+            switch &o in object {
+                case DynamicObject:
+                    o.x += o.velocity.x
+                    o.y += o.velocity.y
+                    j := 0
+                    for j < len(objects) {
+                        skip_add = false
+                        object_inside := &objects[j]
+                        other_x, other_y: f64
+                        other_mass: uint
+
+                        switch &ob in object_inside {
+                            case StaticObject:
+                                other_x = ob.x
+                                other_y = ob.y
+                                other_mass = ob.mass
+                            case DynamicObject:
+                                other_x = ob.x
+                                other_y = ob.y
+                                other_mass = ob.mass
+                        }
+
+                        if object != object_inside {
                             other_distance: [2]f64
-                            other_distance.x = cast(f64) ob.x - o.x
-                            other_distance.y = (cast(f64) ob.y - o.y)
+                            other_distance.x = cast(f64) other_x - o.x
+                            other_distance.y = (cast(f64) other_y - o.y)
 
                             other_normalized := linalg.vector_normalize(other_distance)
 
                             distance := linalg.distance(other_distance, [?]f64{0, 0})
-                            effect := 0.01 * (cast(f64) 1 / math.max(distance, 1)) * cast(f64) ob.mass
+                            if distance < size_from_mass(cast(f64) o.mass) / 2 || distance < size_from_mass(cast(f64) other_mass) / 2 {
+                                switch &ob in object_inside {
+                                    case StaticObject:
+                                        ob.mass += o.mass
+                                    case DynamicObject:
+                                        ob.mass += o.mass
+                                        ob.velocity /= 4
+
+                                        if o.mass > ob.mass {
+                                            ob.x = o.x
+                                            ob.y = o.y
+                                        }
+                                }
+
+                                unordered_remove(objects, i)
+
+                                skip_add = true
+                                break
+                            }
+
+                            effect := 0.01 * (cast(f64) 1 / math.max(distance, 1)) * cast(f64) other_mass * (1 / cast(f64) o.mass)
 
                             new_velocity: [2]f64
                             new_velocity.x = o.velocity.x * (1 - effect) + other_normalized.x * effect
                             new_velocity.y = o.velocity.y * (1 - effect) + other_normalized.y * effect
                             o.velocity = new_velocity
+                        }
+
+                        j += 1
                     }
-                }
-            case StaticObject:
+                case StaticObject:
+            }
+            if !skip_add {
+                i += 1
+            }
         }
     }
 }
@@ -59,16 +110,17 @@ render_object :: proc(renderer: ^sdl2.Renderer, object: Object) {
     x, y, w, h: uint
     switch o in object {
         case StaticObject:
-            size := o.mass
-            x = o.x - size / 2
-            y = o.y - size / 2
-            w = size
-            h = size
+            size := size_from_mass(cast(f64) o.mass)
+            x = cast(uint) (o.x - size / 2)
+            y = cast(uint) (o.y - size / 2)
+            w = cast(uint) size
+            h = cast(uint) size
         case DynamicObject:
-            x = cast(uint) (o.x - 2)
-            y = cast(uint) (o.y - 2)
-            w = 4
-            h = 4
+            size := size_from_mass(cast(f64) o.mass)
+            x = cast(uint) (o.x - size / 2)
+            y = cast(uint) (o.y - size / 2)
+            w = cast(uint) size
+            h = cast(uint) size
     }
     box: sdl2.Rect
     box.x = cast(i32) x
@@ -78,16 +130,26 @@ render_object :: proc(renderer: ^sdl2.Renderer, object: Object) {
     sdl2.RenderFillRect(renderer, &box)
 }
 
-reset :: proc(objects: ^[dynamic]Object) {
+reset_single_dynamic :: proc(objects: ^[dynamic]Object) {
     clear(objects)
     for _ in 0..<10 {
-        x := cast(uint) rand.int_max(1920)
-        y := cast(uint) rand.int_max(1080)
-        mass := cast(uint) rand.int_max(20) + 10
+        x := cast(f64) rand.int_max(1920)
+        y := cast(f64) rand.int_max(1080)
+        mass := cast(uint) rand.int_max(240) + 120
         append(objects, StaticObject { x, y, mass })
     }
 
-    append(objects, DynamicObject { 0, 0, {2, 0} })
+    append(objects, DynamicObject { 0, 0, {2, 0}, 25 })
+}
+
+reset_multi_dynamic :: proc(objects: ^[dynamic]Object, count: u64) {
+    clear(objects)
+    for _ in 0..<count {
+        x := cast(f64) rand.int_max(1920)
+        y := cast(f64) rand.int_max(1080)
+        mass := cast(uint) rand.int_max(1024) + 120
+        append(objects, DynamicObject { x, y, {0, 0}, mass })
+    }
 }
 
 main :: proc() {
@@ -96,7 +158,6 @@ main :: proc() {
     renderer := sdl2.CreateRenderer(window, -1, sdl2.RENDERER_ACCELERATED | sdl2.RENDERER_PRESENTVSYNC)
 
     objects: [dynamic]Object
-    reset(&objects)
 
     loop: for {
         event: sdl2.Event
@@ -105,15 +166,18 @@ main :: proc() {
                 break loop
             } else if event.type == .KEYDOWN {
                 key := event.key
-                if key.keysym.scancode == .R {
-                    reset(&objects)
+                #partial switch key.keysym.scancode {
+                    case .A:
+                        reset_single_dynamic(&objects)
+                    case .B:
+                        reset_multi_dynamic(&objects, 10)
+                    case .C:
+                        reset_multi_dynamic(&objects, 100)
                 }
             }
         }
 
-        for &object in objects {
-            update_object(&object, objects)
-        }
+        update_objects(&objects)
 
         sdl2.SetRenderDrawColor(renderer, 0x00, 0x00, 0x00, 0x00)
         sdl2.RenderClear(renderer)
