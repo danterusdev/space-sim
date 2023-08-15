@@ -6,4 +6,4 @@ A gravity / planet simulator (though it is not a very accurate implementation of
 odin run .
 ```
 
-There are 3 different simulations available by pressing A, B, or C on the keyboard.
+There are 4 different simulations available by pressing A, B, C, or D on the keyboard.

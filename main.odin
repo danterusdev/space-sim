@@ -130,11 +130,14 @@ render_object :: proc(renderer: ^sdl2.Renderer, object: Object) {
     sdl2.RenderFillRect(renderer, &box)
 }
 
+SCREEN_WIDTH :: 1920
+SCREEN_HEIGHT :: 1080
+
 reset_single_dynamic :: proc(objects: ^[dynamic]Object) {
     clear(objects)
     for _ in 0..<10 {
-        x := cast(f64) rand.int_max(1920)
-        y := cast(f64) rand.int_max(1080)
+        x := cast(f64) rand.int_max(SCREEN_WIDTH)
+        y := cast(f64) rand.int_max(SCREEN_HEIGHT)
         mass := cast(uint) rand.int_max(240) + 120
         append(objects, StaticObject { x, y, mass })
     }
@@ -145,19 +148,27 @@ reset_single_dynamic :: proc(objects: ^[dynamic]Object) {
 reset_multi_dynamic :: proc(objects: ^[dynamic]Object, count: u64) {
     clear(objects)
     for _ in 0..<count {
-        x := cast(f64) rand.int_max(1920)
-        y := cast(f64) rand.int_max(1080)
+        x := cast(f64) rand.int_max(SCREEN_WIDTH)
+        y := cast(f64) rand.int_max(SCREEN_HEIGHT)
+        x_velocity := rand.float64_range(0, 0.25)
+        y_velocity := rand.float64_range(0, 0.25)
         mass := cast(uint) rand.int_max(1024) + 120
-        append(objects, DynamicObject { x, y, {0, 0}, mass })
+        append(objects, DynamicObject { x, y, {x_velocity, y_velocity}, mass })
     }
+}
+
+Mode :: enum {
+    Standard,
+    Place_Dynamic_Random_Mass,
 }
 
 main :: proc() {
     sdl2.Init(sdl2.INIT_EVERYTHING)
-    window := sdl2.CreateWindow("Window", sdl2.WINDOWPOS_UNDEFINED, sdl2.WINDOWPOS_UNDEFINED, 1920, 1080, sdl2.WINDOW_SHOWN)
+    window := sdl2.CreateWindow("Window", sdl2.WINDOWPOS_UNDEFINED, sdl2.WINDOWPOS_UNDEFINED, SCREEN_WIDTH, SCREEN_HEIGHT, sdl2.WINDOW_SHOWN)
     renderer := sdl2.CreateRenderer(window, -1, sdl2.RENDERER_ACCELERATED | sdl2.RENDERER_PRESENTVSYNC)
 
     objects: [dynamic]Object
+    mode: Mode
 
     loop: for {
         event: sdl2.Event
@@ -169,10 +180,23 @@ main :: proc() {
                 #partial switch key.keysym.scancode {
                     case .A:
                         reset_single_dynamic(&objects)
+                        mode = .Standard
                     case .B:
                         reset_multi_dynamic(&objects, 10)
+                        mode = .Standard
                     case .C:
                         reset_multi_dynamic(&objects, 100)
+                        mode = .Standard
+                    case .D:
+                        reset_multi_dynamic(&objects, 0)
+                        mode = .Place_Dynamic_Random_Mass
+                }
+            } else if event.type == .MOUSEBUTTONDOWN {
+                #partial switch mode {
+                    case .Place_Dynamic_Random_Mass:
+                        button_event := event.button
+                        mass := cast(uint) rand.int_max(1024) + 120
+                        append(&objects, DynamicObject { cast(f64) button_event.x, cast(f64) button_event.y, {0, 0}, mass })
                 }
             }
         }
