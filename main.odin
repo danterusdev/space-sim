@@ -72,13 +72,13 @@ update_objects :: proc(objects: ^[dynamic]Object) {
                                     case StaticObject:
                                         ob.mass += o.mass
                                     case DynamicObject:
-                                        ob.mass += o.mass
-                                        ob.velocity /= 4
-
                                         if o.mass > ob.mass {
                                             ob.x = o.x
                                             ob.y = o.y
                                         }
+
+                                        ob.mass += o.mass
+                                        ob.velocity /= 4
                                 }
 
                                 unordered_remove(objects, i)
@@ -157,9 +157,59 @@ reset_multi_dynamic :: proc(objects: ^[dynamic]Object, count: u64) {
     }
 }
 
+render_filled_rect :: proc(renderer: ^sdl2.Renderer, x: i32, y: i32, w: i32, h: i32, color: u32) {
+    box: sdl2.Rect
+    box.x = x
+    box.y = y
+    box.w = w
+    box.h = h
+    sdl2.SetRenderDrawColor(renderer, cast(u8) (color >> 24) & 0xFF, cast(u8) (color >> 16) & 0xFF, cast(u8) (color >> 8) & 0xFF, cast(u8) (color >> 0) & 0xFF)
+    sdl2.RenderFillRect(renderer, &box)
+}
+
+MIN_MASS :: 128
+MAX_MASS :: 16384
+
+handle_click_config :: proc(x: i32, y: i32, state: ^Full_Control_State) {
+    gui_x: i32 = (SCREEN_WIDTH - 5) - (SCREEN_WIDTH / 3)
+    gui_y: i32 = 5
+    gui_w: i32 = SCREEN_WIDTH / 3
+    gui_h: i32 = SCREEN_HEIGHT - 10
+
+    if x > gui_x + 10 && x < gui_x + gui_w - 10 && y > gui_y + 30 && y < gui_y + 55 {
+        mass_percentage := cast(f64) (x - (gui_x + 10)) / cast(f64) (gui_x + gui_w - 10 - (gui_x + 10))
+        state.current_object_config.mass = cast(uint) (mass_percentage * cast(f64) (MAX_MASS - MIN_MASS) + cast(f64) MIN_MASS)
+    }
+}
+
+render_config :: proc(renderer: ^sdl2.Renderer, state: ^Full_Control_State) {
+    x: i32 = (SCREEN_WIDTH - 5) - (SCREEN_WIDTH / 3)
+    y: i32 = 5
+    w: i32 = SCREEN_WIDTH / 3
+    h: i32 = SCREEN_HEIGHT - 10
+    render_filled_rect(renderer, x, y, w, h, 0x50505050)
+
+    // Mass Slider
+    {
+        render_filled_rect(renderer, x + 10, y + 40, w - 20, 5, 0x303030FF)
+        mass_percentage := cast(f64) (state.current_object_config.mass - MIN_MASS) / cast(f64) (MAX_MASS - MIN_MASS)
+        render_filled_rect(renderer, x + 10 - 12 + cast(i32) (cast(f64) (w - 20) * mass_percentage), y + 30, 25, 25, 0xAAAAAAFF)
+    }
+}
+
 Mode :: enum {
     Standard,
     Place_Dynamic_Random_Mass,
+    Full_Control,
+}
+
+Full_Control_State :: struct {
+    running: bool,
+    current_object_config: ^DynamicObject,
+}
+
+State :: union {
+    Full_Control_State
 }
 
 main :: proc() {
@@ -169,6 +219,7 @@ main :: proc() {
 
     objects: [dynamic]Object
     mode: Mode
+    state: State
 
     loop: for {
         event: sdl2.Event
@@ -188,8 +239,16 @@ main :: proc() {
                         reset_multi_dynamic(&objects, 100)
                         mode = .Standard
                     case .D:
-                        reset_multi_dynamic(&objects, 0)
+                        clear(&objects)
                         mode = .Place_Dynamic_Random_Mass
+                    case .E:
+                        clear(&objects)
+                        mode = .Full_Control
+                        state = Full_Control_State {}
+                    case .S:
+                        if mode == .Full_Control {
+                            (&state.(Full_Control_State)).running = !state.(Full_Control_State).running
+                        }
                 }
             } else if event.type == .MOUSEBUTTONDOWN {
                 #partial switch mode {
@@ -197,18 +256,58 @@ main :: proc() {
                         button_event := event.button
                         mass := cast(uint) rand.int_max(1024) + 120
                         append(&objects, DynamicObject { cast(f64) button_event.x, cast(f64) button_event.y, {0, 0}, mass })
+                    case .Full_Control:
+                        handled := false
+                        button_event := event.button
+                        event_x := cast(f64) button_event.x
+                        event_y := cast(f64) button_event.y
+
+                        if mode == .Full_Control && state.(Full_Control_State).current_object_config != nil && event_x > (SCREEN_WIDTH - 5) - (SCREEN_WIDTH / 3) {
+                            handle_click_config(button_event.x, button_event.y, &state.(Full_Control_State))
+                            handled = true
+                        } else if mode == .Full_Control && state.(Full_Control_State).current_object_config != nil {
+                            (&state.(Full_Control_State)).current_object_config = nil
+                            handled = true
+                        }
+
+
+                        if !handled {
+                            for &object in objects {
+                                o := &object.(DynamicObject)
+                                object_left := o.x - size_from_mass(cast(f64) o.mass) / 2
+                                object_right := o.x + size_from_mass(cast(f64) o.mass) / 2
+                                object_top := o.y - size_from_mass(cast(f64) o.mass) / 2
+                                object_bottom := o.y + size_from_mass(cast(f64) o.mass) / 2
+
+                                if event_x > object_left && event_x < object_right && event_y > object_top && event_y < object_bottom {
+                                    (&state.(Full_Control_State)).current_object_config = o
+                                    handled = true
+                                    //break event_handle
+                                }
+                            }
+                        }
+
+                        if !handled {
+                            append(&objects, DynamicObject { cast(f64) button_event.x, cast(f64) button_event.y, {0, 0}, 240 })
+                        }
                 }
             }
         }
 
-        update_objects(&objects)
+        if mode != .Full_Control || state.(Full_Control_State).running {
+            update_objects(&objects)
+        }
 
-        sdl2.SetRenderDrawColor(renderer, 0x00, 0x00, 0x00, 0x00)
+        sdl2.SetRenderDrawColor(renderer, 0x10, 0x10, 0x10, 0x00)
         sdl2.RenderClear(renderer)
 
-        sdl2.SetRenderDrawColor(renderer, 0xFF, 0xFF, 0xFF, 0xFF)
+        sdl2.SetRenderDrawColor(renderer, 0xEE, 0xEE, 0xEE, 0xFF)
         for object in objects {
             render_object(renderer, object)
+        }
+
+        if mode == .Full_Control && state.(Full_Control_State).current_object_config != nil {
+            render_config(renderer, &state.(Full_Control_State))
         }
 
         sdl2.RenderPresent(renderer)
