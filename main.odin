@@ -15,20 +15,20 @@ Object :: union {
 StaticObject :: struct {
     x: f64,
     y: f64,
-    mass: uint,
+    mass: f64,
 }
 
 DynamicObject :: struct {
     x: f64,
     y: f64,
     velocity: [2]f64,
-    mass: uint,
+    mass: f64,
 }
 
 SPEED :: 5
 
-size_from_mass :: proc(mass: f64) -> f64 {
-    return math.sqrt(mass)
+radius_from_mass :: proc(mass: f64) -> f64 {
+    return math.sqrt(mass) / 2
 }
 
 update_objects :: proc(objects: ^[dynamic]Object) {
@@ -46,7 +46,7 @@ update_objects :: proc(objects: ^[dynamic]Object) {
                         skip_add = false
                         object_inside := &objects[j]
                         other_x, other_y: f64
-                        other_mass: uint
+                        other_mass: f64
 
                         switch &ob in object_inside {
                             case StaticObject:
@@ -61,13 +61,13 @@ update_objects :: proc(objects: ^[dynamic]Object) {
 
                         if object != object_inside {
                             other_distance: [2]f64
-                            other_distance.x = cast(f64) other_x - o.x
-                            other_distance.y = (cast(f64) other_y - o.y)
+                            other_distance.x = other_x - o.x
+                            other_distance.y = (other_y - o.y)
 
                             other_normalized := linalg.vector_normalize(other_distance)
 
                             distance := linalg.distance(other_distance, [?]f64{0, 0})
-                            if distance < size_from_mass(cast(f64) o.mass) / 2 || distance < size_from_mass(cast(f64) other_mass) / 2 {
+                            if distance < radius_from_mass(o.mass) || distance < radius_from_mass(other_mass) {
                                 switch &ob in object_inside {
                                     case StaticObject:
                                         ob.mass += o.mass
@@ -87,7 +87,7 @@ update_objects :: proc(objects: ^[dynamic]Object) {
                                 break
                             }
 
-                            effect := 0.01 * (cast(f64) 1 / math.max(distance, 1)) * cast(f64) other_mass * (1 / cast(f64) o.mass)
+                            effect := 0.01 * (1 / math.max(distance, 1)) * other_mass * (1 / o.mass)
 
                             new_velocity: [2]f64
                             new_velocity.x = o.velocity.x * (1 - effect) + other_normalized.x * effect
@@ -110,17 +110,17 @@ render_object :: proc(renderer: ^sdl2.Renderer, object: Object) {
     x, y, w, h: uint
     switch o in object {
         case StaticObject:
-            size := size_from_mass(cast(f64) o.mass)
-            x = cast(uint) (o.x - size / 2)
-            y = cast(uint) (o.y - size / 2)
-            w = cast(uint) size
-            h = cast(uint) size
+            radius := radius_from_mass(o.mass)
+            x = cast(uint) (o.x - radius)
+            y = cast(uint) (o.y - radius)
+            w = cast(uint) radius * 2
+            h = cast(uint) radius * 2
         case DynamicObject:
-            size := size_from_mass(cast(f64) o.mass)
-            x = cast(uint) (o.x - size / 2)
-            y = cast(uint) (o.y - size / 2)
-            w = cast(uint) size
-            h = cast(uint) size
+            radius := radius_from_mass(o.mass)
+            x = cast(uint) (o.x - radius)
+            y = cast(uint) (o.y - radius)
+            w = cast(uint) radius * 2
+            h = cast(uint) radius * 2
     }
     box: sdl2.Rect
     box.x = cast(i32) x
@@ -132,30 +132,6 @@ render_object :: proc(renderer: ^sdl2.Renderer, object: Object) {
 
 SCREEN_WIDTH :: 1920
 SCREEN_HEIGHT :: 1080
-
-//reset_single_dynamic :: proc(objects: ^[dynamic]Object) {
-//    clear(objects)
-//    for _ in 0..<10 {
-//        x := cast(f64) rand.int_max(SCREEN_WIDTH)
-//        y := cast(f64) rand.int_max(SCREEN_HEIGHT)
-//        mass := cast(uint) rand.int_max(240) + 120
-//        append(objects, StaticObject { x, y, mass })
-//    }
-//
-//    append(objects, DynamicObject { 0, 0, {2, 0}, 25 })
-//}
-//
-//reset_multi_dynamic :: proc(objects: ^[dynamic]Object, count: u64) {
-//    clear(objects)
-//    for _ in 0..<count {
-//        x := cast(f64) rand.int_max(SCREEN_WIDTH)
-//        y := cast(f64) rand.int_max(SCREEN_HEIGHT)
-//        x_velocity := rand.float64_range(0, 0.25)
-//        y_velocity := rand.float64_range(0, 0.25)
-//        mass := cast(uint) rand.int_max(1024) + 120
-//        append(objects, DynamicObject { x, y, {x_velocity, y_velocity}, mass })
-//    }
-//}
 
 render_filled_rect :: proc(renderer: ^sdl2.Renderer, x: i32, y: i32, w: i32, h: i32, color: u32) {
     box: sdl2.Rect
@@ -170,29 +146,44 @@ render_filled_rect :: proc(renderer: ^sdl2.Renderer, x: i32, y: i32, w: i32, h: 
 MIN_MASS :: 128
 MAX_MASS :: 16384
 
-handle_click_config :: proc(x: i32, y: i32, state: ^State) {
-    gui_x: i32 = (SCREEN_WIDTH - 5) - (SCREEN_WIDTH / 3)
-    gui_y: i32 = 5
-    gui_w: i32 = SCREEN_WIDTH / 3
-    gui_h: i32 = SCREEN_HEIGHT - 10
+config_dimensions :: proc() -> (x: i32, y: i32, w: i32, h: i32) {
+    x = (SCREEN_WIDTH - 20) - (SCREEN_WIDTH / 3)
+    y = 20
+    w = SCREEN_WIDTH / 3
+    h = SCREEN_HEIGHT - 40
+    return
+}
 
-    if x > gui_x + 10 && x < gui_x + gui_w - 10 && y > gui_y + 30 && y < gui_y + 55 {
-        mass_percentage := cast(f64) (x - (gui_x + 10)) / cast(f64) (gui_x + gui_w - 10 - (gui_x + 10))
-        state.current_object_config.mass = cast(uint) (mass_percentage * cast(f64) (MAX_MASS - MIN_MASS) + cast(f64) MIN_MASS)
+config_mass_slider_dimensions :: proc() -> (x: i32, y: i32, by: i32, w: i32, h: i32, bh: i32) {
+    gui_x, gui_y, gui_w, gui_h := config_dimensions()
+    w = gui_w - 80
+    h = 25
+    bh = 5
+    x = gui_x + 40
+    y = gui_y + 80
+    by = y + (h / 2) - bh / 2
+    return
+}
+
+handle_click_config :: proc(x: i32, y: i32, state: ^State) {
+    gui_x, gui_y, gui_w, gui_h := config_dimensions()
+
+    sx, sy, sby, sw, sh, sbh := config_mass_slider_dimensions()
+    if x > sx && x < sx + sw && y > sy && y < sy + sh {
+        mass_percentage := cast(f64) (x - sx) / cast(f64) sw
+        state.current_object_config.mass = mass_percentage * (MAX_MASS - MIN_MASS) + MIN_MASS
         state.dragging_slider = true
     }
 }
 
 handle_move_config :: proc(x: i32, y: i32, state: ^State) {
-    gui_x: i32 = (SCREEN_WIDTH - 5) - (SCREEN_WIDTH / 3)
-    gui_y: i32 = 5
-    gui_w: i32 = SCREEN_WIDTH / 3
-    gui_h: i32 = SCREEN_HEIGHT - 10
+    gui_x, gui_y, gui_w, gui_h := config_dimensions()
 
     if state.dragging_slider {
-        mass_percentage := cast(f64) (x - (gui_x + 10)) / cast(f64) (gui_x + gui_w - 10 - (gui_x + 10))
+        sx, sy, sby, sw, sh, sbh := config_mass_slider_dimensions()
+        mass_percentage := cast(f64) (x - sx) / cast(f64) sw
         mass_percentage = max(min(mass_percentage, 1), 0)
-        state.current_object_config.mass = cast(uint) (mass_percentage * cast(f64) (MAX_MASS - MIN_MASS) + cast(f64) MIN_MASS)
+        state.current_object_config.mass = mass_percentage * (MAX_MASS - MIN_MASS) + MIN_MASS
     }
 }
 
@@ -203,17 +194,15 @@ handle_unclick_config :: proc(x: i32, y: i32, state: ^State) {
 }
 
 render_config :: proc(renderer: ^sdl2.Renderer, state: ^State) {
-    x: i32 = (SCREEN_WIDTH - 5) - (SCREEN_WIDTH / 3)
-    y: i32 = 5
-    w: i32 = SCREEN_WIDTH / 3
-    h: i32 = SCREEN_HEIGHT - 10
+    x, y, w, h := config_dimensions()
     render_filled_rect(renderer, x, y, w, h, 0x50505050)
 
     // Mass Slider
     {
-        render_filled_rect(renderer, x + 10, y + 40, w - 20, 5, 0x303030FF)
+        sx, sy, sby, sw, sh, sbh := config_mass_slider_dimensions()
+        render_filled_rect(renderer, sx, sby, sw, sbh, 0x303030FF)
         mass_percentage := cast(f64) (state.current_object_config.mass - MIN_MASS) / cast(f64) (MAX_MASS - MIN_MASS)
-        render_filled_rect(renderer, x + 10 - 12 + cast(i32) (cast(f64) (w - 20) * mass_percentage), y + 30, 25, 25, 0xAAAAAAFF)
+        render_filled_rect(renderer, sx - (sh / 2) + cast(i32) (cast(f64) sw * mass_percentage), sy, sh, sh, 0xAAAAAAFF)
     }
 }
 
@@ -248,8 +237,8 @@ main :: proc() {
             } else if event.type == .MOUSEBUTTONDOWN {
                 event_handle: {
                     button_event := event.button
-                    event_x := cast(f64) button_event.x
-                    event_y := cast(f64) button_event.y
+                    event_x := button_event.x
+                    event_y := button_event.y
 
                     if state.current_object_config != nil && event_x > (SCREEN_WIDTH - 5) - (SCREEN_WIDTH / 3) {
                         handle_click_config(button_event.x, button_event.y, &state)
@@ -262,10 +251,10 @@ main :: proc() {
 
                     for &object in objects {
                         o := &object.(DynamicObject)
-                        object_left := o.x - size_from_mass(cast(f64) o.mass) / 2
-                        object_right := o.x + size_from_mass(cast(f64) o.mass) / 2
-                        object_top := o.y - size_from_mass(cast(f64) o.mass) / 2
-                        object_bottom := o.y + size_from_mass(cast(f64) o.mass) / 2
+                        object_left := cast(i32) (o.x - radius_from_mass(o.mass))
+                        object_right := cast(i32) (o.x + radius_from_mass(o.mass))
+                        object_top := cast(i32) (o.y - radius_from_mass(o.mass))
+                        object_bottom := cast(i32) (o.y + radius_from_mass(o.mass))
 
                         if event_x > object_left && event_x < object_right && event_y > object_top && event_y < object_bottom {
                             state.current_object_config = o
@@ -273,26 +262,26 @@ main :: proc() {
                         }
                     }
 
-                    append(&objects, DynamicObject { cast(f64) button_event.x, cast(f64) button_event.y, {0, 0}, 240 })
+                    append(&objects, DynamicObject { cast(f64) event_x, cast(f64) event_y, {0, 0}, 240 })
                 }
             } else if event.type == .MOUSEBUTTONUP {
                 event_handle_up: {
                     button_event := event.button
-                    event_x := cast(f64) button_event.x
-                    event_y := cast(f64) button_event.y
+                    event_x := button_event.x
+                    event_y := button_event.y
 
                     if state.current_object_config != nil {
-                        handle_unclick_config(button_event.x, button_event.y, &state)
+                        handle_unclick_config(event_x, event_y, &state)
                         break event_handle_up
                     }
                 }
             } else if event.type == .MOUSEMOTION {
                 motion_event := event.button
-                event_x := cast(f64) motion_event.x
-                event_y := cast(f64) motion_event.y
+                event_x := motion_event.x
+                event_y := motion_event.y
 
-                if state.current_object_config != nil && event_x > (SCREEN_WIDTH - 5) - (SCREEN_WIDTH / 3) {
-                    handle_move_config(motion_event.x, motion_event.y, &state)
+                if state.current_object_config != nil {
+                    handle_move_config(event_x, event_y, &state)
                 }
             }
         }
