@@ -7,18 +7,7 @@ import "core:math/linalg"
 
 import "vendor:sdl2"
 
-Object :: union {
-    StaticObject,
-    DynamicObject,
-}
-
-StaticObject :: struct {
-    x: f64,
-    y: f64,
-    mass: f64,
-}
-
-DynamicObject :: struct {
+Object :: struct {
     x: f64,
     y: f64,
     velocity: [2]f64,
@@ -37,67 +26,51 @@ update_objects :: proc(objects: ^[dynamic]Object) {
         for i < len(objects) {
             skip_add := false
             object := &objects[i]
-            switch &o in object {
-                case DynamicObject:
-                    o.x += o.velocity.x
-                    o.y += o.velocity.y
-                    j := 0
-                    for j < len(objects) {
-                        skip_add = false
-                        object_inside := &objects[j]
-                        other_x, other_y: f64
-                        other_mass: f64
+            object.x += object.velocity.x
+            object.y += object.velocity.y
+            j := 0
+            for j < len(objects) {
+                skip_add = false
+                object_inside := &objects[j]
+                other_x, other_y: f64
+                other_mass: f64
 
-                        switch &ob in object_inside {
-                            case StaticObject:
-                                other_x = ob.x
-                                other_y = ob.y
-                                other_mass = ob.mass
-                            case DynamicObject:
-                                other_x = ob.x
-                                other_y = ob.y
-                                other_mass = ob.mass
+                other_x = object_inside.x
+                other_y = object_inside.y
+                other_mass = object_inside.mass
+
+                if object != object_inside {
+                    other_distance: [2]f64
+                    other_distance.x = other_x - object.x
+                    other_distance.y = (other_y - object.y)
+
+                    other_normalized := linalg.vector_normalize(other_distance)
+
+                    distance := linalg.distance(other_distance, [?]f64{0, 0})
+                    if distance < radius_from_mass(object.mass) || distance < radius_from_mass(other_mass) {
+                        if object.mass > object_inside.mass {
+                            object_inside.x = object.x
+                            object_inside.y = object.y
                         }
 
-                        if object != object_inside {
-                            other_distance: [2]f64
-                            other_distance.x = other_x - o.x
-                            other_distance.y = (other_y - o.y)
+                        object_inside.mass += object.mass
+                        object_inside.velocity /= 4
 
-                            other_normalized := linalg.vector_normalize(other_distance)
+                        unordered_remove(objects, i)
 
-                            distance := linalg.distance(other_distance, [?]f64{0, 0})
-                            if distance < radius_from_mass(o.mass) || distance < radius_from_mass(other_mass) {
-                                switch &ob in object_inside {
-                                    case StaticObject:
-                                        ob.mass += o.mass
-                                    case DynamicObject:
-                                        if o.mass > ob.mass {
-                                            ob.x = o.x
-                                            ob.y = o.y
-                                        }
-
-                                        ob.mass += o.mass
-                                        ob.velocity /= 4
-                                }
-
-                                unordered_remove(objects, i)
-
-                                skip_add = true
-                                break
-                            }
-
-                            effect := 0.01 * (1 / math.max(distance, 1)) * other_mass * (1 / o.mass)
-
-                            new_velocity: [2]f64
-                            new_velocity.x = o.velocity.x * (1 - effect) + other_normalized.x * effect
-                            new_velocity.y = o.velocity.y * (1 - effect) + other_normalized.y * effect
-                            o.velocity = new_velocity
-                        }
-
-                        j += 1
+                        skip_add = true
+                        break
                     }
-                case StaticObject:
+
+                    effect := 0.01 * (1 / math.max(distance, 1)) * other_mass * (1 / object.mass)
+
+                    new_velocity: [2]f64
+                    new_velocity.x = object.velocity.x * (1 - effect) + other_normalized.x * effect
+                    new_velocity.y = object.velocity.y * (1 - effect) + other_normalized.y * effect
+                    object.velocity = new_velocity
+                }
+
+                j += 1
             }
             if !skip_add {
                 i += 1
@@ -108,20 +81,12 @@ update_objects :: proc(objects: ^[dynamic]Object) {
 
 render_object :: proc(renderer: ^sdl2.Renderer, object: Object) {
     x, y, w, h: uint
-    switch o in object {
-        case StaticObject:
-            radius := radius_from_mass(o.mass)
-            x = cast(uint) (o.x - radius)
-            y = cast(uint) (o.y - radius)
-            w = cast(uint) radius * 2
-            h = cast(uint) radius * 2
-        case DynamicObject:
-            radius := radius_from_mass(o.mass)
-            x = cast(uint) (o.x - radius)
-            y = cast(uint) (o.y - radius)
-            w = cast(uint) radius * 2
-            h = cast(uint) radius * 2
-    }
+    radius := radius_from_mass(object.mass)
+    x = cast(uint) (object.x - radius)
+    y = cast(uint) (object.y - radius)
+    w = cast(uint) radius * 2
+    h = cast(uint) radius * 2
+
     box: sdl2.Rect
     box.x = cast(i32) x
     box.y = cast(i32) y
@@ -165,6 +130,15 @@ config_mass_slider_dimensions :: proc() -> (x: i32, y: i32, by: i32, w: i32, h: 
     return
 }
 
+config_delete_button_dimensions :: proc() -> (x: i32, y: i32, w: i32, h: i32) {
+    gui_x, gui_y, gui_w, gui_h := config_dimensions()
+    x = gui_x + 40
+    y = gui_y + 120
+    w = 25
+    h = 25
+    return
+}
+
 handle_click_config :: proc(x: i32, y: i32, state: ^State) {
     gui_x, gui_y, gui_w, gui_h := config_dimensions()
 
@@ -173,6 +147,19 @@ handle_click_config :: proc(x: i32, y: i32, state: ^State) {
         mass_percentage := cast(f64) (x - sx) / cast(f64) sw
         state.current_object_config.mass = mass_percentage * (MAX_MASS - MIN_MASS) + MIN_MASS
         state.dragging_slider = true
+    }
+
+    bx, by, bw, bh := config_delete_button_dimensions()
+    if x > bx && x < bx + bw && y > by && y < by + bh {
+        index := -1
+        for &object, i in state.objects {
+            if &object == state.current_object_config {
+                index = i
+            }
+        }
+        assert(index >= 0)
+        unordered_remove(&state.objects, index)
+        state.current_object_config = nil
     }
 }
 
@@ -204,12 +191,19 @@ render_config :: proc(renderer: ^sdl2.Renderer, state: ^State) {
         mass_percentage := cast(f64) (state.current_object_config.mass - MIN_MASS) / cast(f64) (MAX_MASS - MIN_MASS)
         render_filled_rect(renderer, sx - (sh / 2) + cast(i32) (cast(f64) sw * mass_percentage), sy, sh, sh, 0xAAAAAAFF)
     }
+
+    // Delete button
+    {
+        bx, by, bw, bh := config_delete_button_dimensions()
+        render_filled_rect(renderer, bx, by, bw, bh, 0xAAAAAAFF)
+    }
 }
 
 State :: struct {
     running: bool,
-    current_object_config: ^DynamicObject,
+    current_object_config: ^Object,
     dragging_slider: bool,
+    objects: [dynamic]Object
 }
 
 main :: proc() {
@@ -217,7 +211,6 @@ main :: proc() {
     window := sdl2.CreateWindow("Window", sdl2.WINDOWPOS_UNDEFINED, sdl2.WINDOWPOS_UNDEFINED, SCREEN_WIDTH, SCREEN_HEIGHT, sdl2.WINDOW_SHOWN)
     renderer := sdl2.CreateRenderer(window, -1, sdl2.RENDERER_ACCELERATED | sdl2.RENDERER_PRESENTVSYNC)
 
-    objects: [dynamic]Object
     state: State
 
     loop: for {
@@ -229,7 +222,7 @@ main :: proc() {
                 key := event.key
                 #partial switch key.keysym.scancode {
                     case .R:
-                        clear(&objects)
+                        clear(&state.objects)
                         state = State {}
                     case .S:
                         state.running = !state.running
@@ -249,20 +242,19 @@ main :: proc() {
                     }
 
 
-                    for &object in objects {
-                        o := &object.(DynamicObject)
-                        object_left := cast(i32) (o.x - radius_from_mass(o.mass))
-                        object_right := cast(i32) (o.x + radius_from_mass(o.mass))
-                        object_top := cast(i32) (o.y - radius_from_mass(o.mass))
-                        object_bottom := cast(i32) (o.y + radius_from_mass(o.mass))
+                    for &object in state.objects {
+                        object_left := cast(i32) (object.x - radius_from_mass(object.mass))
+                        object_right := cast(i32) (object.x + radius_from_mass(object.mass))
+                        object_top := cast(i32) (object.y - radius_from_mass(object.mass))
+                        object_bottom := cast(i32) (object.y + radius_from_mass(object.mass))
 
                         if event_x > object_left && event_x < object_right && event_y > object_top && event_y < object_bottom {
-                            state.current_object_config = o
+                            state.current_object_config = &object
                             break event_handle
                         }
                     }
 
-                    append(&objects, DynamicObject { cast(f64) event_x, cast(f64) event_y, {0, 0}, 240 })
+                    append(&state.objects, Object { cast(f64) event_x, cast(f64) event_y, {0, 0}, 240 })
                 }
             } else if event.type == .MOUSEBUTTONUP {
                 event_handle_up: {
@@ -287,14 +279,14 @@ main :: proc() {
         }
 
         if state.running {
-            update_objects(&objects)
+            update_objects(&state.objects)
         }
 
         sdl2.SetRenderDrawColor(renderer, 0x10, 0x10, 0x10, 0x00)
         sdl2.RenderClear(renderer)
 
         sdl2.SetRenderDrawColor(renderer, 0xEE, 0xEE, 0xEE, 0xFF)
-        for object in objects {
+        for object in state.objects {
             render_object(renderer, object)
         }
 
