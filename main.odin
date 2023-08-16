@@ -133,29 +133,29 @@ render_object :: proc(renderer: ^sdl2.Renderer, object: Object) {
 SCREEN_WIDTH :: 1920
 SCREEN_HEIGHT :: 1080
 
-reset_single_dynamic :: proc(objects: ^[dynamic]Object) {
-    clear(objects)
-    for _ in 0..<10 {
-        x := cast(f64) rand.int_max(SCREEN_WIDTH)
-        y := cast(f64) rand.int_max(SCREEN_HEIGHT)
-        mass := cast(uint) rand.int_max(240) + 120
-        append(objects, StaticObject { x, y, mass })
-    }
-
-    append(objects, DynamicObject { 0, 0, {2, 0}, 25 })
-}
-
-reset_multi_dynamic :: proc(objects: ^[dynamic]Object, count: u64) {
-    clear(objects)
-    for _ in 0..<count {
-        x := cast(f64) rand.int_max(SCREEN_WIDTH)
-        y := cast(f64) rand.int_max(SCREEN_HEIGHT)
-        x_velocity := rand.float64_range(0, 0.25)
-        y_velocity := rand.float64_range(0, 0.25)
-        mass := cast(uint) rand.int_max(1024) + 120
-        append(objects, DynamicObject { x, y, {x_velocity, y_velocity}, mass })
-    }
-}
+//reset_single_dynamic :: proc(objects: ^[dynamic]Object) {
+//    clear(objects)
+//    for _ in 0..<10 {
+//        x := cast(f64) rand.int_max(SCREEN_WIDTH)
+//        y := cast(f64) rand.int_max(SCREEN_HEIGHT)
+//        mass := cast(uint) rand.int_max(240) + 120
+//        append(objects, StaticObject { x, y, mass })
+//    }
+//
+//    append(objects, DynamicObject { 0, 0, {2, 0}, 25 })
+//}
+//
+//reset_multi_dynamic :: proc(objects: ^[dynamic]Object, count: u64) {
+//    clear(objects)
+//    for _ in 0..<count {
+//        x := cast(f64) rand.int_max(SCREEN_WIDTH)
+//        y := cast(f64) rand.int_max(SCREEN_HEIGHT)
+//        x_velocity := rand.float64_range(0, 0.25)
+//        y_velocity := rand.float64_range(0, 0.25)
+//        mass := cast(uint) rand.int_max(1024) + 120
+//        append(objects, DynamicObject { x, y, {x_velocity, y_velocity}, mass })
+//    }
+//}
 
 render_filled_rect :: proc(renderer: ^sdl2.Renderer, x: i32, y: i32, w: i32, h: i32, color: u32) {
     box: sdl2.Rect
@@ -170,7 +170,7 @@ render_filled_rect :: proc(renderer: ^sdl2.Renderer, x: i32, y: i32, w: i32, h: 
 MIN_MASS :: 128
 MAX_MASS :: 16384
 
-handle_click_config :: proc(x: i32, y: i32, state: ^Full_Control_State) {
+handle_click_config :: proc(x: i32, y: i32, state: ^State) {
     gui_x: i32 = (SCREEN_WIDTH - 5) - (SCREEN_WIDTH / 3)
     gui_y: i32 = 5
     gui_w: i32 = SCREEN_WIDTH / 3
@@ -179,10 +179,30 @@ handle_click_config :: proc(x: i32, y: i32, state: ^Full_Control_State) {
     if x > gui_x + 10 && x < gui_x + gui_w - 10 && y > gui_y + 30 && y < gui_y + 55 {
         mass_percentage := cast(f64) (x - (gui_x + 10)) / cast(f64) (gui_x + gui_w - 10 - (gui_x + 10))
         state.current_object_config.mass = cast(uint) (mass_percentage * cast(f64) (MAX_MASS - MIN_MASS) + cast(f64) MIN_MASS)
+        state.dragging_slider = true
     }
 }
 
-render_config :: proc(renderer: ^sdl2.Renderer, state: ^Full_Control_State) {
+handle_move_config :: proc(x: i32, y: i32, state: ^State) {
+    gui_x: i32 = (SCREEN_WIDTH - 5) - (SCREEN_WIDTH / 3)
+    gui_y: i32 = 5
+    gui_w: i32 = SCREEN_WIDTH / 3
+    gui_h: i32 = SCREEN_HEIGHT - 10
+
+    if state.dragging_slider {
+        mass_percentage := cast(f64) (x - (gui_x + 10)) / cast(f64) (gui_x + gui_w - 10 - (gui_x + 10))
+        mass_percentage = max(min(mass_percentage, 1), 0)
+        state.current_object_config.mass = cast(uint) (mass_percentage * cast(f64) (MAX_MASS - MIN_MASS) + cast(f64) MIN_MASS)
+    }
+}
+
+handle_unclick_config :: proc(x: i32, y: i32, state: ^State) {
+    if state.dragging_slider {
+        state.dragging_slider = false
+    }
+}
+
+render_config :: proc(renderer: ^sdl2.Renderer, state: ^State) {
     x: i32 = (SCREEN_WIDTH - 5) - (SCREEN_WIDTH / 3)
     y: i32 = 5
     w: i32 = SCREEN_WIDTH / 3
@@ -197,19 +217,10 @@ render_config :: proc(renderer: ^sdl2.Renderer, state: ^Full_Control_State) {
     }
 }
 
-Mode :: enum {
-    Standard,
-    Place_Dynamic_Random_Mass,
-    Full_Control,
-}
-
-Full_Control_State :: struct {
+State :: struct {
     running: bool,
     current_object_config: ^DynamicObject,
-}
-
-State :: union {
-    Full_Control_State
+    dragging_slider: bool,
 }
 
 main :: proc() {
@@ -218,7 +229,6 @@ main :: proc() {
     renderer := sdl2.CreateRenderer(window, -1, sdl2.RENDERER_ACCELERATED | sdl2.RENDERER_PRESENTVSYNC)
 
     objects: [dynamic]Object
-    mode: Mode
     state: State
 
     loop: for {
@@ -229,72 +239,65 @@ main :: proc() {
             } else if event.type == .KEYDOWN {
                 key := event.key
                 #partial switch key.keysym.scancode {
-                    case .A:
-                        reset_single_dynamic(&objects)
-                        mode = .Standard
-                    case .B:
-                        reset_multi_dynamic(&objects, 10)
-                        mode = .Standard
-                    case .C:
-                        reset_multi_dynamic(&objects, 100)
-                        mode = .Standard
-                    case .D:
+                    case .R:
                         clear(&objects)
-                        mode = .Place_Dynamic_Random_Mass
-                    case .E:
-                        clear(&objects)
-                        mode = .Full_Control
-                        state = Full_Control_State {}
+                        state = State {}
                     case .S:
-                        if mode == .Full_Control {
-                            (&state.(Full_Control_State)).running = !state.(Full_Control_State).running
-                        }
+                        state.running = !state.running
                 }
             } else if event.type == .MOUSEBUTTONDOWN {
-                #partial switch mode {
-                    case .Place_Dynamic_Random_Mass:
-                        button_event := event.button
-                        mass := cast(uint) rand.int_max(1024) + 120
-                        append(&objects, DynamicObject { cast(f64) button_event.x, cast(f64) button_event.y, {0, 0}, mass })
-                    case .Full_Control:
-                        handled := false
-                        button_event := event.button
-                        event_x := cast(f64) button_event.x
-                        event_y := cast(f64) button_event.y
+                event_handle: {
+                    button_event := event.button
+                    event_x := cast(f64) button_event.x
+                    event_y := cast(f64) button_event.y
 
-                        if mode == .Full_Control && state.(Full_Control_State).current_object_config != nil && event_x > (SCREEN_WIDTH - 5) - (SCREEN_WIDTH / 3) {
-                            handle_click_config(button_event.x, button_event.y, &state.(Full_Control_State))
-                            handled = true
-                        } else if mode == .Full_Control && state.(Full_Control_State).current_object_config != nil {
-                            (&state.(Full_Control_State)).current_object_config = nil
-                            handled = true
+                    if state.current_object_config != nil && event_x > (SCREEN_WIDTH - 5) - (SCREEN_WIDTH / 3) {
+                        handle_click_config(button_event.x, button_event.y, &state)
+                        break event_handle
+                    } else if state.current_object_config != nil {
+                        state.current_object_config = nil
+                        break event_handle
+                    }
+
+
+                    for &object in objects {
+                        o := &object.(DynamicObject)
+                        object_left := o.x - size_from_mass(cast(f64) o.mass) / 2
+                        object_right := o.x + size_from_mass(cast(f64) o.mass) / 2
+                        object_top := o.y - size_from_mass(cast(f64) o.mass) / 2
+                        object_bottom := o.y + size_from_mass(cast(f64) o.mass) / 2
+
+                        if event_x > object_left && event_x < object_right && event_y > object_top && event_y < object_bottom {
+                            state.current_object_config = o
+                            break event_handle
                         }
+                    }
 
+                    append(&objects, DynamicObject { cast(f64) button_event.x, cast(f64) button_event.y, {0, 0}, 240 })
+                }
+            } else if event.type == .MOUSEBUTTONUP {
+                event_handle_up: {
+                    button_event := event.button
+                    event_x := cast(f64) button_event.x
+                    event_y := cast(f64) button_event.y
 
-                        if !handled {
-                            for &object in objects {
-                                o := &object.(DynamicObject)
-                                object_left := o.x - size_from_mass(cast(f64) o.mass) / 2
-                                object_right := o.x + size_from_mass(cast(f64) o.mass) / 2
-                                object_top := o.y - size_from_mass(cast(f64) o.mass) / 2
-                                object_bottom := o.y + size_from_mass(cast(f64) o.mass) / 2
+                    if state.current_object_config != nil {
+                        handle_unclick_config(button_event.x, button_event.y, &state)
+                        break event_handle_up
+                    }
+                }
+            } else if event.type == .MOUSEMOTION {
+                motion_event := event.button
+                event_x := cast(f64) motion_event.x
+                event_y := cast(f64) motion_event.y
 
-                                if event_x > object_left && event_x < object_right && event_y > object_top && event_y < object_bottom {
-                                    (&state.(Full_Control_State)).current_object_config = o
-                                    handled = true
-                                    //break event_handle
-                                }
-                            }
-                        }
-
-                        if !handled {
-                            append(&objects, DynamicObject { cast(f64) button_event.x, cast(f64) button_event.y, {0, 0}, 240 })
-                        }
+                if state.current_object_config != nil && event_x > (SCREEN_WIDTH - 5) - (SCREEN_WIDTH / 3) {
+                    handle_move_config(motion_event.x, motion_event.y, &state)
                 }
             }
         }
 
-        if mode != .Full_Control || state.(Full_Control_State).running {
+        if state.running {
             update_objects(&objects)
         }
 
@@ -306,8 +309,8 @@ main :: proc() {
             render_object(renderer, object)
         }
 
-        if mode == .Full_Control && state.(Full_Control_State).current_object_config != nil {
-            render_config(renderer, &state.(Full_Control_State))
+        if state.current_object_config != nil {
+            render_config(renderer, &state)
         }
 
         sdl2.RenderPresent(renderer)
