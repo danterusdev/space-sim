@@ -121,38 +121,51 @@ config_dimensions :: proc() -> (x: i32, y: i32, w: i32, h: i32) {
     return
 }
 
-config_mass_slider_dimensions :: proc() -> (x: i32, y: i32, by: i32, w: i32, h: i32, bh: i32) {
+config_mass_slider_dimensions :: proc() -> (x: i32, y: i32, ey: i32, by: i32, w: i32, h: i32, bh: i32) {
     gui_x, gui_y, gui_w, gui_h := config_dimensions()
     w = gui_w - 80
     h = 25
     bh = 5
     x = gui_x + 40
-    y = gui_y + 80
-    by = y + (h / 2) - bh / 2
+    y = gui_y + 40
+    ey = y + 40
+    by = ey + (h / 2) - bh / 2
     return
 }
 
-config_delete_button_dimensions :: proc() -> (x: i32, y: i32, w: i32, h: i32) {
+config_delete_button_dimensions :: proc() -> (x: i32, ex: i32, y: i32, w: i32, h: i32) {
     gui_x, gui_y, gui_w, gui_h := config_dimensions()
     x = gui_x + 40
+    ex = x + 120
     y = gui_y + 120
     w = 25
     h = 25
     return
 }
 
+mass_slider_text: ^sdl2.Texture
+remove_button_text: ^sdl2.Texture
+
+init_config :: proc(renderer: ^sdl2.Renderer, font: ^ttf.Font) {
+    mass_slider_surface := ttf.RenderText_Solid(font, "Mass", {0xAA, 0xAA, 0xAA, 0xFF})
+    mass_slider_text = sdl2.CreateTextureFromSurface(renderer, mass_slider_surface)
+
+    remove_button_surface := ttf.RenderText_Solid(font, "Remove", {0xAA, 0xAA, 0xAA, 0xFF})
+    remove_button_text = sdl2.CreateTextureFromSurface(renderer, remove_button_surface)
+}
+
 handle_click_config :: proc(x: i32, y: i32, state: ^State) {
     gui_x, gui_y, gui_w, gui_h := config_dimensions()
 
-    sx, sy, sby, sw, sh, sbh := config_mass_slider_dimensions()
-    if x > sx && x < sx + sw && y > sy && y < sy + sh {
+    sx, sy, sey, sby, sw, sh, sbh := config_mass_slider_dimensions()
+    if x > sx && x < sx + sw && y > sey && y < sey + sh {
         mass_percentage := cast(f64) (x - sx) / cast(f64) sw
         state.current_object_config.mass = mass_percentage * (MAX_MASS - MIN_MASS) + MIN_MASS
         state.dragging_slider = true
     }
 
-    bx, by, bw, bh := config_delete_button_dimensions()
-    if x > bx && x < bx + bw && y > by && y < by + bh {
+    bx, bex, by, bw, bh := config_delete_button_dimensions()
+    if x > bex && x < bex + bw && y > by && y < by + bh {
         index := -1
         for &object, i in state.objects {
             if &object == state.current_object_config {
@@ -169,7 +182,7 @@ handle_move_config :: proc(x: i32, y: i32, state: ^State) {
     gui_x, gui_y, gui_w, gui_h := config_dimensions()
 
     if state.dragging_slider {
-        sx, sy, sby, sw, sh, sbh := config_mass_slider_dimensions()
+        sx, sy, sey, sby, sw, sh, sbh := config_mass_slider_dimensions()
         mass_percentage := cast(f64) (x - sx) / cast(f64) sw
         mass_percentage = max(min(mass_percentage, 1), 0)
         state.current_object_config.mass = mass_percentage * (MAX_MASS - MIN_MASS) + MIN_MASS
@@ -182,22 +195,34 @@ handle_unclick_config :: proc(x: i32, y: i32, state: ^State) {
     }
 }
 
-render_config :: proc(renderer: ^sdl2.Renderer, state: ^State) {
+render_config :: proc(renderer: ^sdl2.Renderer, font: ^ttf.Font, state: ^State) {
     x, y, w, h := config_dimensions()
     render_filled_rect(renderer, x, y, w, h, 0x50505050)
 
     // Mass Slider
     {
-        sx, sy, sby, sw, sh, sbh := config_mass_slider_dimensions()
+        sx, sy, sey, sby, sw, sh, sbh := config_mass_slider_dimensions()
+
+        tw, th: c.int
+        ttf.SizeText(font, "Mass", &tw, &th)
+        text_rect := sdl2.Rect { sx, sy, tw, th}
+        sdl2.RenderCopy(renderer, mass_slider_text, nil, &text_rect)
+
         render_filled_rect(renderer, sx, sby, sw, sbh, 0x303030FF)
         mass_percentage := cast(f64) (state.current_object_config.mass - MIN_MASS) / cast(f64) (MAX_MASS - MIN_MASS)
-        render_filled_rect(renderer, sx - (sh / 2) + cast(i32) (cast(f64) sw * mass_percentage), sy, sh, sh, 0xAAAAAAFF)
+        render_filled_rect(renderer, sx - (sh / 2) + cast(i32) (cast(f64) sw * mass_percentage), sey, sh, sh, 0xAAAAAAFF)
     }
 
     // Delete button
     {
-        bx, by, bw, bh := config_delete_button_dimensions()
-        render_filled_rect(renderer, bx, by, bw, bh, 0xAAAAAAFF)
+        bx, bex, by, bw, bh := config_delete_button_dimensions()
+
+        tw, th: c.int
+        ttf.SizeText(font, "Remove", &tw, &th)
+        text_rect := sdl2.Rect { bx, by, tw, th}
+        sdl2.RenderCopy(renderer, remove_button_text, nil, &text_rect)
+
+        render_filled_rect(renderer, bex, by, bw, bh, 0xAAAAAAFF)
     }
 }
 
@@ -220,6 +245,8 @@ main :: proc() {
     paused_text := sdl2.CreateTextureFromSurface(renderer, paused_surface)
     paused_w, paused_h: c.int
     ttf.SizeText(font, "(paused)", &paused_w, &paused_h)
+
+    init_config(renderer, font)
 
     state: State
 
@@ -306,7 +333,7 @@ main :: proc() {
         }
 
         if state.current_object_config != nil {
-            render_config(renderer, &state)
+            render_config(renderer, font, &state)
         }
 
         sdl2.RenderPresent(renderer)
