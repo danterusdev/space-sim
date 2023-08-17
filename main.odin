@@ -1,11 +1,13 @@
 package main
 
+import "core:c"
 import "core:fmt"
 import "core:math"
 import "core:math/rand"
 import "core:math/linalg"
 
 import "vendor:sdl2"
+import "vendor:sdl2/ttf"
 
 Object :: struct {
     x: f64,
@@ -211,6 +213,14 @@ main :: proc() {
     window := sdl2.CreateWindow("Window", sdl2.WINDOWPOS_UNDEFINED, sdl2.WINDOWPOS_UNDEFINED, SCREEN_WIDTH, SCREEN_HEIGHT, sdl2.WINDOW_SHOWN)
     renderer := sdl2.CreateRenderer(window, -1, sdl2.RENDERER_ACCELERATED | sdl2.RENDERER_PRESENTVSYNC)
 
+    ttf.Init()
+    font := ttf.OpenFont("OpenSans-Regular.ttf", 24)
+
+    paused_surface := ttf.RenderText_Solid(font, "(paused)", {255, 0, 0, 255})
+    paused_text := sdl2.CreateTextureFromSurface(renderer, paused_surface)
+    paused_w, paused_h: c.int
+    ttf.SizeText(font, "(paused)", &paused_w, &paused_h)
+
     state: State
 
     loop: for {
@@ -284,6 +294,11 @@ main :: proc() {
 
         sdl2.SetRenderDrawColor(renderer, 0x10, 0x10, 0x10, 0x00)
         sdl2.RenderClear(renderer)
+
+        if !state.running {
+            paused_rect := sdl2.Rect { 0, 0, paused_w, paused_h }
+            sdl2.RenderCopy(renderer, paused_text, nil, &paused_rect)
+        }
 
         sdl2.SetRenderDrawColor(renderer, 0xEE, 0xEE, 0xEE, 0xFF)
         for object in state.objects {
